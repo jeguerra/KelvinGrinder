@@ -84,20 +84,69 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        rhoBar *= 1.0 / PHYS[3]
                               
        # Check the background state
-       fig, axes = plt.subplots(2, 2)
+       fig, axes = plt.subplots(2, 2, figsize=(12, 10), tight_layout=True)
        axes[0,0].plot(zg, thetaBar)
        axes[0,1].plot(zg, pBar)
        axes[1,0].plot(zg, TBar)
        axes[1,1].plot(zg, rhoBar)
+       plt.show()
    
        return thetaBar, rhoBar, pBar
 
-def computeGridDerivatives(REFS):
+def computeGridDerivativesZ(REFS):
     
        NZ = REFS[2]
        # Initialize grid and make column vector
        zc, w = cheblb(REFS)
        zg = 0.5 * REFS[0] * (1.0 - zc) 
+   
+       # Get the Chebyshev transformation matrix
+       CTD = chebpolym(REFS, zc)
+   
+       # Make the weights into a diagonal matrix
+       W = np.eye(NZ)
+       for ii in range(NZ):
+              W[ii,ii] = w[ii]
+   
+       # Compute scaling for the forward transform
+       S = np.eye(NZ)
+   
+       for ii in range(NZ - 1):
+              S[ii,ii] = ((CTD[:,ii]).T * W * CTD[:,ii]) ** (-1)
+
+       S[NZ-1,NZ-1] = 1.0 / mt.pi
+   
+       # Compute the spectral derivative coefficients
+       SDIFF = np.zeros((NZ,NZ))
+       SDIFF[NZ-2,NZ-1] = 2.0 * NZ
+   
+       for ii in reversed(range(NZ - 2)):
+              A = 2.0 * (ii + 1)
+              B = 1.0
+              if ii > 0:
+                     c = 1.0
+              else:
+                     c = 2.0
+            
+              SDIFF[ii,:] = B / c * SDIFF[ii+2,:]
+              SDIFF[ii,ii+1] = A / c
+    
+       # Chebyshev spectral transform in matrix form
+       STR_L = S * CTD * W;
+       # Chebyshev spatial derivative based on spectral differentiation
+       # Domain scale factor included here
+       DDZ = - (2.0 / REFS[0]) * CTD.T * SDIFF * STR_L;
+       DDZ2 = np.matmul(DDZ, DDZ)
+   
+       return zg, CTD, DDZ, DDZ2
+
+def computeGridDerivativesP(PHYS, REFS, pBar):
+    
+       NZ = REFS[2]
+       # Initialize grid and make column vector
+       zc, w = cheblb(REFS)
+       DP = 
+       pg = 0.5 * REFS[0] * (1.0 - zc) 
    
        # Get the Chebyshev transformation matrix
        CTD = chebpolym(REFS, zc)
