@@ -84,13 +84,14 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        rhoBar *= 1.0 / PHYS[3]
                               
        # Check the background state
+       '''
        fig, axes = plt.subplots(2, 2, figsize=(12, 10), tight_layout=True)
        axes[0,0].plot(zg, thetaBar)
        axes[0,1].plot(zg, pBar)
        axes[1,0].plot(zg, TBar)
        axes[1,1].plot(zg, rhoBar)
        plt.show()
-   
+       '''
        return thetaBar, rhoBar, pBar
 
 def computeGridDerivativesZ(REFS):
@@ -137,7 +138,23 @@ def computeGridDerivativesZ(REFS):
        # Domain scale factor included here
        DDZ = - (2.0 / REFS[0]) * CTD.T * SDIFF * STR_L;
        DDZ2 = np.matmul(DDZ, DDZ)
-   
+       
+       # Make a test function and its derivative (DEBUG)
+       """
+       zv = (1.0 / zH) * zg
+       zv2 = np.multiply(zv, zv)
+       Y = 4.0 * np.exp(-2.0 * zv) + \
+       np.cos(4.0 * mt.pi * zv2);
+       DY = -8.0 * np.exp(-2.0 * zv)
+       term1 = 8.0 * mt.pi * zv
+       term2 = np.sin(4.0 * mt.pi * zv2)
+       DY -= np.multiply(term1, term2);
+    
+       DYD = np.matmul(DDZ, Y)
+       plt.figure
+       plt.plot(zv, Y, zv, DY, zv, DYD)
+       """
+       
        return zg, CTD, DDZ, DDZ2
 
 def computeGridDerivativesP(PHYS, REFS, pBar):
@@ -145,8 +162,9 @@ def computeGridDerivativesP(PHYS, REFS, pBar):
        NZ = REFS[2]
        # Initialize grid and make column vector
        zc, w = cheblb(REFS)
-       DP = 
-       pg = 0.5 * REFS[0] * (1.0 - zc) 
+       DP = (pBar[NZ-1] - pBar[0]).flat[0]
+       p0pH = (pBar[NZ-1] + pBar[0]).flat[0]
+       pg = np.flip(0.5 * np.add(DP * zc, p0pH), 0) 
    
        # Get the Chebyshev transformation matrix
        CTD = chebpolym(REFS, zc)
@@ -183,10 +201,10 @@ def computeGridDerivativesP(PHYS, REFS, pBar):
        STR_L = S * CTD * W;
        # Chebyshev spatial derivative based on spectral differentiation
        # Domain scale factor included here
-       DDZ = - (2.0 / REFS[0]) * CTD.T * SDIFF * STR_L;
-       DDZ2 = np.matmul(DDZ, DDZ)
+       DDP = - (2.0 / DP) * CTD.T * SDIFF * STR_L;
+       DDP2 = np.matmul(DDZ, DDZ)
    
-       return zg, CTD, DDZ, DDZ2
+       return pg, DDP, DDP2
 
 if __name__ == '__main__':
        
@@ -211,26 +229,33 @@ if __name__ == '__main__':
        # Put all the input parameters into a list REFS
        REFS = [zH, zTP, NZ, T0, GamTrop, GamStrt]
        
-       # Compute the grid and derivative matrices
-       zg, CTD, DDZ, DDZ2 = computeGridDerivatives(REFS)
-       
-       # Make a test function and its derivative (DEBUG)
-       """
-       zv = (1.0 / zH) * zg
-       zv2 = np.multiply(zv, zv)
-       Y = 4.0 * np.exp(-2.0 * zv) + \
-       np.cos(4.0 * mt.pi * zv2);
-       DY = -8.0 * np.exp(-2.0 * zv)
-       term1 = 8.0 * mt.pi * zv
-       term2 = np.sin(4.0 * mt.pi * zv2)
-       DY -= np.multiply(term1, term2);
-    
-       DYD = np.matmul(DDZ, Y)
-       plt.figure
-       plt.plot(zv, Y, zv, DY, zv, DYD)
-       """
+       # Compute the geometric grid and derivative matrices
+       zg, CTD, DDZ, DDZ2 = computeGridDerivativesZ(REFS)
     
        # Compute the background profiles (theta and rho) based on two lapse rates in theta
        thetaBar, rhoBar, pBar = computeBackground(PHYS, REFS, zg, DDZ)
        
-       # Compose the global operator for the linearized shallow water system
+       # Compute the isobaric grid and derivative matrices
+       pg, DDP, DDP2 = computeGridDerivativesP(PHYS, REFS, pBar)
+       
+       # Compute the variable stratification and make a diagonal matrix
+       c = 61.5
+       rhoBar2 = np.power(rhoBar, 2.0)
+       rhoBar2I = np.reciprocal(rhoBar2)
+       G2 = 1.0 / gc * np.multiply(rhoBar2I, np.matmul(DDZ, thetaBar))
+       G2M = np.eye(NZ)
+       for ii in range(NZ):
+              G2M[ii,ii] = G2[ii]
+              
+       # Compute the operator
+       EOP = DDP2 + G2M
+       
+       # Apply Dirichlet BC
+       EOPS = EOP[1:NZ-1,1:NZ-1]
+       
+       # Compute eigensolve
+       ew, ev = np.linalg.eig(EOP)
+       
+       #%% Plot the first eigenvector
+       Psi = ev[:,0]
+       plt.plot(zg, Psi)
