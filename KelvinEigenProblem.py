@@ -137,7 +137,10 @@ def computeGridDerivativesZ(REFS):
        # Chebyshev spatial derivative based on spectral differentiation
        # Domain scale factor included here
        DDZ = - (2.0 / REFS[0]) * CTD.T * SDIFF * STR_L;
-       DDZ2 = np.matmul(DDZ, DDZ)
+       # Compute 2nd derivative
+       SDIFF2 = np.matmul(SDIFF, SDIFF)
+       DDZ2 = - (2.0 / REFS[0]) * CTD.T * SDIFF2 * STR_L;
+       #DDZ2 = np.matmul(DDZ, DDZ)
        
        # Make a test function and its derivative (DEBUG)
        """
@@ -202,7 +205,10 @@ def computeGridDerivativesP(PHYS, REFS, pBar):
        # Chebyshev spatial derivative based on spectral differentiation
        # Domain scale factor included here
        DDP = - (2.0 / DP) * CTD.T * SDIFF * STR_L;
-       DDP2 = np.matmul(DDZ, DDZ)
+       # Compute 2nd derivative
+       SDIFF2 = np.matmul(SDIFF, SDIFF)
+       DDP2 = - (2.0 / DP) * CTD.T * SDIFF2 * STR_L;
+       #DDP2 = np.matmul(DDP, DDP)
    
        return pg, DDP, DDP2
 
@@ -221,7 +227,7 @@ if __name__ == '__main__':
        # Set up the grid using Tempest nominal HS data near the equator
        zH = 30000.0
        zTP = 16000.0
-       NZ = 128
+       NZ = 256
        T0 = 295.0
        GamTrop = 1.9E-3 # K per meter
        GamStrt = 2.4E-2 # K per meter
@@ -242,7 +248,10 @@ if __name__ == '__main__':
        c = 61.5
        rhoBar2 = np.power(rhoBar, 2.0)
        rhoBar2I = np.reciprocal(rhoBar2)
-       G2 = 1.0 / gc * np.multiply(rhoBar2I, np.matmul(DDZ, thetaBar))
+       thetaBarI = np.reciprocal(thetaBar)
+       NBV = np.matmul(DDZ, thetaBar)
+       NBV = np.multiply(NBV, thetaBarI)
+       G2 = 1.0 / gc * np.multiply(rhoBar2I, NBV)
        G2M = np.eye(NZ)
        for ii in range(NZ):
               G2M[ii,ii] = G2[ii]
@@ -256,6 +265,10 @@ if __name__ == '__main__':
        # Compute eigensolve
        ew, ev = np.linalg.eig(EOP)
        
+       # Sort the eigenvalues and vectors ascending
+       sdex = np.argsort(ew)
+       lam = ew[sdex]
+       Psi = ev[:,sdex]
+       
        #%% Plot the first eigenvector
-       Psi = ev[:,0]
-       plt.plot(zg, Psi)
+       plt.plot(zg, Psi[:,10])
