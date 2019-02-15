@@ -273,11 +273,24 @@ if __name__ == '__main__':
        # Compute eigensolve
        ew, ev = np.linalg.eig(EOPS)
        
-       # Sort the eigenvalues and vectors ascending
+       #%% Sort the eigenvalues and vectors ascending
+       Psi = np.zeros((NZ,2))
        sdex = np.argsort(np.real(ew))
        lam = ew[sdex]
-       Psi = ev[:,sdex]
+       ev = ev[:,sdex]
+       Psi[1:NZ-1,:] = ev[:,248:250]
+       c1 = mt.sqrt(1.0 / abs(lam[248]))
+       c2 = mt.sqrt(1.0 / abs(lam[249]))
        
        #%% Plot the first eigenvector
-       plt.plot(zg[1:NZ-1], Psi[:,249:NZ-2])
+       fig = plt.figure(figsize=(12, 6), tight_layout=True)
+       plt.plot(zg, Psi[:,0], 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c1)
+       plt.plot(zg, Psi[:,1], 'b', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c2)
+       plt.xlabel('Z (m)')
+       plt.ylabel('Eigenfunction')
+       plt.title('Kelvin Wave Vertical Structure')
+       plt.legend()
+       plt.grid(b=True, which='both', axis='both')
        plt.show()
+       
+       plt.savefig("KelvinWaveStructure.png")
