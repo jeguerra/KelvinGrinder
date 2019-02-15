@@ -50,6 +50,8 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        # Initialize and make column vectors
        thetaBar = np.mat(np.zeros(REFS[2]))
        thetaBar = thetaBar.T
+       dThdZ = np.mat(np.zeros(REFS[2]))
+       dThdZ = dThdZ.T
        rhoBar = np.mat(np.zeros(REFS[2]))
        rhoBar = rhoBar.T
        pBar = np.mat(np.zeros(REFS[2]))
@@ -64,6 +66,9 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        for ii in range(N):
               if zg[ii] >= REFS[1]:
                      thetaBar[ii] = thetaSTR[ii]
+                     dThdZ[ii] = REFS[5]
+              else:
+                     dThdZ[ii] = REFS[4]
             
        # Compute the Neumann boundary value at the top z = H
        A = - PHYS[0] * (PHYS[1]**PHYS[4]) / PHYS[3]
@@ -92,7 +97,7 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        axes[1,1].plot(zg, rhoBar)
        plt.show()
        '''
-       return thetaBar, rhoBar, pBar
+       return thetaBar, dThdZ, rhoBar, pBar
 
 def computeGridDerivativesZ(REFS):
     
@@ -239,7 +244,7 @@ if __name__ == '__main__':
        zg, CTD, DDZ, DDZ2 = computeGridDerivativesZ(REFS)
     
        # Compute the background profiles (theta and rho) based on two lapse rates in theta
-       thetaBar, rhoBar, pBar = computeBackground(PHYS, REFS, zg, DDZ)
+       thetaBar, dThdZ, rhoBar, pBar = computeBackground(PHYS, REFS, zg, DDZ)
        
        # Compute the isobaric grid and derivative matrices
        pg, DDP, DDP2 = computeGridDerivativesP(PHYS, REFS, pBar)
@@ -249,7 +254,10 @@ if __name__ == '__main__':
        rhoBar2 = np.power(rhoBar, 2.0)
        rhoBar2I = np.reciprocal(rhoBar2)
        thetaBarI = np.reciprocal(thetaBar)
-       NBV = np.matmul(DDZ, thetaBar)
+       # Spectral derivative... BAD FOR DISCONTINUITY
+       #NBV = np.matmul(DDZ, thetaBar)
+       # Use the prescribed lapse rates
+       NBV = dThdZ
        NBV = np.multiply(NBV, thetaBarI)
        G2 = 1.0 / gc * np.multiply(rhoBar2I, NBV)
        G2M = np.eye(NZ)
@@ -263,12 +271,13 @@ if __name__ == '__main__':
        EOPS = EOP[1:NZ-1,1:NZ-1]
        
        # Compute eigensolve
-       ew, ev = np.linalg.eig(EOP)
+       ew, ev = np.linalg.eig(EOPS)
        
        # Sort the eigenvalues and vectors ascending
-       sdex = np.argsort(ew)
+       sdex = np.argsort(np.real(ew))
        lam = ew[sdex]
        Psi = ev[:,sdex]
        
        #%% Plot the first eigenvector
-       plt.plot(zg, Psi[:,10])
+       plt.plot(zg[1:NZ-1], Psi[:,249:NZ-2])
+       plt.show()
