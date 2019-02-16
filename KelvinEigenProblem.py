@@ -78,8 +78,9 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        #          rho0 * PHYS[0] * REFS[0] * (PHYS[4] - 1.0) * PHYS[1]**(-PHYS[4]))
     
        # Solve the system... Dirichlet condition at z = 0m (SEE NOTES)
-       pBar[range(1,N)] = A * PHYS[4] * \
-                              la.solve(DDZ[1:N,1:N], thetaBarI[1:N])
+       NE = N
+       pBar[range(1,NE)] = A * PHYS[4] * \
+                              la.solve(DDZ[1:NE,1:NE], thetaBarI[1:NE])
        pBar += PHYS[1]**PHYS[4]
        pBar = np.power(pBar, 1.0 / PHYS[4])
                               
@@ -89,14 +90,18 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        rhoBar *= 1.0 / PHYS[3]
                               
        # Check the background state
-       '''
+       #'''
        fig, axes = plt.subplots(2, 2, figsize=(12, 10), tight_layout=True)
        axes[0,0].plot(zg, thetaBar)
+       axes[0,0].set_title('$\\theta(z)$ $K$')
        axes[0,1].plot(zg, pBar)
+       axes[0,1].set_title('$p(z)$ $Pa$')
        axes[1,0].plot(zg, TBar)
+       axes[1,0].set_title('$T(z)$ $K$')
        axes[1,1].plot(zg, rhoBar)
+       axes[1,1].set_title('$\\rho(z)$ $kgm^{-3}$')
        plt.show()
-       '''
+       #'''
        return thetaBar, dThdZ, rhoBar, pBar
 
 def computeGridDerivativesZ(REFS):
@@ -145,7 +150,6 @@ def computeGridDerivativesZ(REFS):
        # Compute 2nd derivative
        SDIFF2 = np.matmul(SDIFF, SDIFF)
        DDZ2 = - (2.0 / REFS[0]) * CTD.T * SDIFF2 * STR_L;
-       #DDZ2 = np.matmul(DDZ, DDZ)
        
        # Make a test function and its derivative (DEBUG)
        """
@@ -161,8 +165,7 @@ def computeGridDerivativesZ(REFS):
        DYD = np.matmul(DDZ, Y)
        plt.figure
        plt.plot(zv, Y, zv, DY, zv, DYD)
-       """
-       
+       """   
        return zg, CTD, DDZ, DDZ2
 
 def computeGridDerivativesP(PHYS, REFS, pBar):
@@ -210,10 +213,11 @@ def computeGridDerivativesP(PHYS, REFS, pBar):
        # Chebyshev spatial derivative based on spectral differentiation
        # Domain scale factor included here
        DDP = - (2.0 / DP) * CTD.T * SDIFF * STR_L;
+       DDP[NZ-1,0:NZ-1] = - 1.0 / DDP[NZ-1,NZ-1] * DDP[NZ-1,0:NZ-1]
        # Compute 2nd derivative
        SDIFF2 = np.matmul(SDIFF, SDIFF)
-       DDP2 = - (2.0 / DP) * CTD.T * SDIFF2 * STR_L;
-       #DDP2 = np.matmul(DDP, DDP)
+       #DDP2 = - (2.0 / DP) * CTD.T * SDIFF2 * STR_L;
+       DDP2 = np.matmul(DDP, - DP / 2.0 * DDP)
    
        return pg, DDP, DDP2
 
@@ -234,8 +238,8 @@ if __name__ == '__main__':
        zTP = 16000.0
        NZ = 256
        T0 = 295.0
-       GamTrop = 1.9E-3 # K per meter
-       GamStrt = 2.4E-2 # K per meter
+       GamTrop = 1.88E-3 # K per meter
+       GamStrt = 2.37E-2 # K per meter
    
        # Put all the input parameters into a list REFS
        REFS = [zH, zTP, NZ, T0, GamTrop, GamStrt]
@@ -267,8 +271,9 @@ if __name__ == '__main__':
        # Compute the operator
        EOP = DDP2 + G2M
        
-       # Apply Dirichlet BC
-       EOPS = EOP[1:NZ-1,1:NZ-1]
+       # Apply Dirichlet BC @ z = 0
+       NE = NZ
+       EOPS = EOP[1:NE,1:NE]
        
        # Compute eigensolve
        ew, ev = np.linalg.eig(EOPS)
@@ -278,14 +283,14 @@ if __name__ == '__main__':
        sdex = np.argsort(np.real(ew))
        lam = ew[sdex]
        ev = ev[:,sdex]
-       Psi[1:NZ-1,:] = ev[:,248:250]
-       c1 = mt.sqrt(1.0 / abs(lam[248]))
-       c2 = mt.sqrt(1.0 / abs(lam[249]))
+       Psi[1:NE,:] = ev[:,[238, 239]]
+       c1 = mt.sqrt(1.0 / abs(lam[238]))
+       c2 = mt.sqrt(1.0 / abs(lam[239]))
        
        #%% Plot the first eigenvector
        fig = plt.figure(figsize=(12, 6), tight_layout=True)
-       plt.plot(zg, Psi[:,0], 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c1)
-       plt.plot(zg, Psi[:,1], 'b', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c2)
+       plt.plot(zg, -Psi[:,0], 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c1)
+       plt.plot(zg, -Psi[:,1], 'b', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c2)
        plt.xlabel('Z (m)')
        plt.ylabel('Eigenfunction')
        plt.title('Kelvin Wave Vertical Structure')
