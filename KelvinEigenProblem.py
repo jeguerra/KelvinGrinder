@@ -8,8 +8,10 @@ Created on Wed Dec 12 12:03:48 2018
 
 import datetime as dt  # Python standard library datetime module
 import numpy as np
+from scipy import linalg as las
+from scipy.optimize import curve_fit
 import math as mt
-from numpy import linalg as la
+from numpy import linalg as lan
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -44,13 +46,32 @@ def chebpolym(REFS, xi):
               CTM[:,ii-2]
               
        return CTM
-
-def computeAdjustedOperatorNBC(DD, tdex):
-       DOP = np.zeros(DD.shape)
        
+def computeAdjustedOperatorNBC(D2A, DOG, DD, tdex, isGivenValue, DP):
+       # D2A is the operator to adjust
+       # DOG is the original operator to adjust (unadjusted)
+       # DD is the 1st derivative operator
+       DOP = np.zeros(DD.shape)
+       # Get the column span size
+       NZ = DD.shape[1]
+       cdex = range(NZ)
+       cdex = np.delete(cdex, tdex)
+       
+       # For prescribed value:
+       if isGivenValue:
+              scale = - DD[tdex,tdex]
+       # For matching at infinity
+       else:
+              scale = (DP - DD[tdex,tdex])
+              
        # Loop over columns of the operator and adjust for BC at z = H (tdex)
-       for jj in range(tdex):
-              DOP[:,jj] = np.ravel(np.add(DD[:,jj], -DD[tdex,jj] / DD[tdex,tdex] * DD[:,tdex]))
+       for jj in cdex:
+              factor = DD[tdex,jj] / scale
+              #factor = scale / DD[tdex,jj]
+              v1 = (D2A[:,jj]).flatten()
+              v2 = (DOG[:,tdex]).flatten()
+              nvector = v1 + factor * v2
+              DOP[:,jj] = nvector
        
        return DOP
 
@@ -88,7 +109,7 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        dpdZ_H = PHYS[4] * A * thetaBarI[N-1]
        dpdZ_H = dpdZ_H[0,0]
        # Compute adjustment to the derivative matrix operator
-       DOP = computeAdjustedOperatorNBC(DDZ, N-1)
+       DOP = computeAdjustedOperatorNBC(DDZ, DDZ, DDZ, N-1, True, pBar)
 
        # Impose resulting Dirichlet conditions p^K top and bottom
        NE = N-1
@@ -103,7 +124,7 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        f = -dpdZ_H / DDZ[N-1,N-1] * DDZ[:,N-1]
        F = np.add(thetaBarI, f)
        # Solve the system for p^K
-       pBar[idex] = A * PHYS[4] * la.solve(DOPS, F[1:NE])
+       pBar[idex] = A * PHYS[4] * lan.solve(DOPS, F[1:NE])
        
        # Compute and set the value at the top that satisfies the BC
        dPdZ_partial = np.dot(DDZ[N-1,bdex], pBar[bdex])
@@ -119,17 +140,24 @@ def computeBackground(PHYS, REFS, zg, DDZ):
        rhoBar *= 1.0 / PHYS[3]
                               
        #%% Check the background state
-       #'''
+       '''
        fig, axes = plt.subplots(2, 2, figsize=(12, 10), tight_layout=True)
-       axes[0,0].plot(zg, thetaBar)
+       axes[0,0].plot(zg, thetaBar, 'k-', linewidth=2)
        axes[0,0].set_title('$\\theta(z)$ $K$')
-       axes[0,1].plot(zg, pBar)
+       axes[0,0].grid(b=True, which='both', axis='both')
+       axes[0,1].plot(zg, pBar, linewidth=2)
        axes[0,1].set_title('$p(z)$ $Pa$')
-       axes[1,0].plot(zg, TBar)
+       axes[0,1].grid(b=True, which='both', axis='both')
+       axes[1,0].plot(zg, TBar, linewidth=2)
        axes[1,0].set_title('$T(z)$ $K$')
-       axes[1,1].plot(zg, rhoBar)
+       axes[1,0].set_xlabel('z (m)')
+       axes[1,0].grid(b=True, which='both', axis='both')
+       axes[1,1].plot(zg, rhoBar, linewidth=2)
        axes[1,1].set_title('$\\rho(z)$ $kgm^{-3}$')
+       axes[1,1].set_xlabel('z (m)')
+       axes[1,1].grid(b=True, which='both', axis='both')
        plt.show()
+       plt.savefig("2LAYER_stratification.png")
        #'''
        return thetaBar, dThdZ, rhoBar, pBar
 
@@ -182,22 +210,25 @@ def computeGridDerivativesZ(REFS):
        
        return zg, SDIFF, DDZ, DDZ2
 
-def computeGridDerivativesP(PHYS, REFS, pBar):
+def computeGridDerivativesP(PHYS, REFS, pBar, dpdz):
     
        NZ = REFS[2]
        # Initialize grid and make column vector
        zc, w = cheblb(REFS)
-       DP = (pBar[NZ-1] - pBar[0]).flat[0]
-       p0pH = (pBar[NZ-1] + pBar[0]).flat[0]
-       pg = np.flip(0.5 * np.add(DP * zc, p0pH), 0) 
+       DP = pBar[NZ-1,0] - pBar[0,0]
+       pg = pBar
+       
+       dpdzI = np.reciprocal(dpdz)
    
        # Get the Chebyshev transformation matrix
        CTD = chebpolym(REFS, zc)
    
        # Make the weights into a diagonal matrix
        W = np.eye(NZ)
+       IDPDZ = np.eye(NZ)
        for ii in range(NZ):
               W[ii,ii] = w[ii]
+              IDPDZ[ii,ii] = dpdzI[ii]
    
        # Compute scaling for the forward transform
        S = np.eye(NZ)
@@ -230,6 +261,7 @@ def computeGridDerivativesP(PHYS, REFS, pBar):
        # Compute 2nd derivative
        SDIFF2 = np.matmul(SDIFF, SDIFF)
        DDP2 = - (2.0 / DP) * CTD.T * SDIFF2 * STR_L;
+       #DDP2 = DDP * DDP
    
        return pg, SDIFF, DDP, DDP2
 
@@ -246,7 +278,7 @@ if __name__ == '__main__':
        PHYS = [gc, P0, cp, Rd, Kp]
        
        # Set up the grid using Tempest nominal HS data near the equator
-       zH = 30000.0
+       zH = 35000.0
        zTP = 16000.0
        NZ = 256
        T0 = 295.0
@@ -263,65 +295,91 @@ if __name__ == '__main__':
        thetaBar, dThdZ, rhoBar, pBar = computeBackground(PHYS, REFS, zg, DDZ)
        
        # Compute the isobaric grid and derivative matrices
-       pg, SDIFFP, DDP, DDP2 = computeGridDerivativesP(PHYS, REFS, pBar)
+       pg, SDIFFP, DDP, DDP2 = computeGridDerivativesP(PHYS, REFS, pBar, -gc * rhoBar)
        
        # Compute the variable stratification and make a diagonal matrix
-       c = 61.5
-       rhoBar2 = np.power(rhoBar, 2.0)
-       rhoBar2I = np.reciprocal(rhoBar2)
-       thetaBarI = np.reciprocal(thetaBar)
+       dpdz = -gc * rhoBar
+       dpdzI = np.reciprocal(dpdz)
+       ddpdz2I = np.matmul(DDZ, dpdzI)
+       
+       def cubicPol(x, a, b, c, d):
+              return a * np.power(x,3.0) + b * np.power(x,2.0) + c * x + d
+       
+       def decayFunc(x, a, b):
+              return a * np.reciprocal(np.power(x,b))
+       
+       popt, covt = curve_fit(cubicPol, np.ravel(pBar), np.ravel(rhoBar))
+       rhoBarP = cubicPol(pBar, *popt)
        # Spectral derivative... BAD FOR DISCONTINUITY
-       #NBV = np.matmul(DDZ, thetaBar)
+       #NBV = np.matmul(DDP, thetaBar)
        # Use the prescribed lapse rates
        NBV = dThdZ
+       thetaBarI = np.reciprocal(thetaBar)
        NBV = np.multiply(NBV, thetaBarI)
+       rhoBar2 = np.power(rhoBar, 2.0)
+       rhoBar2I = np.reciprocal(rhoBar2)
        G2 = 1.0 / gc * np.multiply(rhoBar2I, NBV)
-       G2M = np.eye(NZ)
-       for ii in range(NZ):
-              G2M[ii,ii] = G2[ii]
-              
-       # Compute the derivatives of pressure
-       dZdp = np.matmul(DDP, zg)
-       #dPdz = np.matmul(DDZ, pBar)
-       #plt.figure
-       #plt.plot(zg, -gc * rhoBar, zg, dPdz, 'k--')
-              
-       # Implement d/dp = 0 at Inf by matching the model top
-       '''
-       dpdP_H = -gc * rhoBar[NZ-1] * dZdp[NZ-1]
-       dpdP_H = dpdP_H[0,0]**2.0
-       DOP = computeAdjustedOperatorNBC(DDP, NZ-1)
-       D2OP = np.matmul(DOP, DOP)
-       # Compute the boundary forcing at the model top
-       f = -dpdP_H / DDP[NZ-1,NZ-1] * DDP[:,NZ-1]
-       F = np.matmul(DDP, f)
-       '''
-       # Compute the operator
-       EOP = DDP2 + G2M
        
+       popt, covt = curve_fit(decayFunc, np.ravel(pBar), np.ravel(G2))
+       G2F = decayFunc(pBar, *popt)
+       
+       IG2 = np.reciprocal(G2)
+       G2M = np.eye(NZ)
+       IG2M = np.eye(NZ)
+       FOP1 = np.eye(NZ)
+       FOP2 = np.eye(NZ)
+       for ii in range(NZ):
+              G2M[ii,ii] = G2F[ii]
+              IG2M[ii,ii] = 1.0 / G2F[ii]
+              #FOP1[ii,ii] = dpdzI[ii,0]**2.0
+              #FOP2[ii,ii] = ddpdz2I[ii]
+              
+       # Compute the differential operator
+       #EOP1 = np.matmul(FOP1, DDZ2)
+       #EOP2 = np.matmul(FOP2, DDZ)
+       #EOP = EOP1 + EOP2
+       
+       #DP = pBar[0]
+       RP = 1.0
+       LHSOP = computeAdjustedOperatorNBC(DDP2, DDP2, DDP, NZ-1, False, RP)
+       RHSOP = computeAdjustedOperatorNBC(G2M, G2M, DDP, NZ-1, False, RP)
+       
+       EOP = LHSOP + RHSOP
+              
        # Apply Dirichlet BC @ z = 0 and z = H
-       NE = NZ
+       NE = NZ-1
+       LHSOPS = LHSOP[1:NE,1:NE]
+       RHSOPS = RHSOP[1:NE,1:NE]
        EOPS = EOP[1:NE,1:NE]
        
-       # Compute solution
-       #emode = np.linalg.solve(EOPS, F[1:NZ-1])
-       
        # Compute eigensolve
-       ew, ev = np.linalg.eig(EOPS)
+       #ew, ev = las.eig(LHSOPS, b=RHSOPS)
+       ew, ev = las.eig(EOPS)
+       
+       # Recover the Neumann BC values (TOP OF ATMOSPHERE)
+       scale = RP - DDP[NE,NE]
+       BCeq = 1.0 / scale * DDP[NE,1:NE]
+       evTop = np.matmul(BCeq, ev)
        
        #%% Sort the eigenvalues and vectors ascending
-       Psi = np.zeros((NZ,2))
+       Psi = np.zeros((NZ,1))
        sdex = np.argsort(np.real(ew))
+       #lam = np.multiply(ew[sdex], G2[sdex,0].flatten())
+       #lam = np.ravel(lam.T)
        lam = ew[sdex]
        ev = ev[:,sdex]
-       Psi[1:NE,:] = ev[:,[242, 243]]
-       c1 = mt.sqrt(1.0 / abs(lam[242]))
-       c2 = mt.sqrt(1.0 / abs(lam[243]))
+       evTop = (evTop.T)[sdex]
+       
+       # Find the next to smallest (negative) eigenvalue
+       vdex = np.argmin(np.abs(lam))
+       #vdex = 1
+       Psi[1:NE,0] = (ev[:,vdex-1]).flatten()
+       Psi[NE,0] = (evTop[vdex-1]).flatten()
+       c1 = mt.sqrt(1.0 / abs(lam[vdex-1]))
        
        #%% Plot the first eigenvector
        fig, (ax0, ax1) = plt.subplots(nrows=2, figsize=(12, 6), tight_layout=True)
-       ax0.plot(1.0E-3 * pg, Psi[:,0], 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c1)
-       ax0.plot(1.0E-3 * pg, Psi[:,1], 'b', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c2)
+       ax0.plot(1.0E-2 * pg, Psi, 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c1)
        ax0.set_xlabel('p (hPa)')
        ax0.set_ylabel('Eigenfunction')
        ax0.set_title('Kelvin Wave Vertical Structure')
@@ -329,8 +387,7 @@ if __name__ == '__main__':
        ax0.grid(b=True, which='both', axis='both')
        ax0.invert_xaxis()
        
-       ax1.plot(1.0E-3 * zg, Psi[:,0], 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c1)
-       ax1.plot(1.0E-3 * zg, Psi[:,1], 'b', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c2)
+       ax1.plot(1.0E-3 * zg, Psi, 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % c1)
        ax1.set_xlabel('z (km)')
        ax1.set_ylabel('Eigenfunction')
        ax1.set_title('Kelvin Wave Vertical Structure')
@@ -339,6 +396,51 @@ if __name__ == '__main__':
        plt.show()
        
        plt.savefig("KelvinWaveStructure.png")
+       
+       #%% Recover the physical fields
+       cv = c1
+       RT = np.multiply(thetaBar, rhoBar)
+       IRT = np.reciprocal(RT)
+       wv = np.multiply(-IRT, Psi)
+       uv = np.matmul(DDP, Psi[:,0])
+       uv = cv * uv
+       ExnerP = -uv
+       B = -cv * np.matmul(DDP2, Psi[:,0])
+       B[0,0] = 0.0
+       theta = np.multiply(-RT, B.T) 
+       
+       fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(nrows=2, ncols=2, figsize=(12, 6), tight_layout=True)
+       
+       ax0.plot(1.0E-3 * zg, P0 * (ExnerP.T), 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % cv)
+       ax0.set_xlabel('$z (km)$')
+       ax0.set_ylabel('$p \: \prime \: (Pa)$')
+       ax0.set_title('Kelvin Wave Vertical Structure: Pressure')
+       ax0.legend()
+       ax0.grid(b=True, which='both', axis='both')
+       
+       ax1.plot(1.0E-3 * zg, theta, 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % cv)
+       ax1.set_xlabel('$z (km)$')
+       ax1.set_ylabel('$\\theta \: \prime \: (K)$')
+       ax1.set_title('Kelvin Wave Vertical Structure: Potential Temperature')
+       ax1.legend()
+       ax1.grid(b=True, which='both', axis='both')
+       
+       ax2.plot(1.0E-3 * zg, uv.T, 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % cv)
+       ax2.set_xlabel('$z (km)$')
+       ax2.set_ylabel('$u \: \prime \: (ms^{-1})$')
+       ax2.set_title('Kelvin Wave Vertical Structure: Horizontal Velocity')
+       ax2.legend()
+       ax2.grid(b=True, which='both', axis='both')
+       
+       ax3.plot(1.0E-3 * zg, wv, 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % cv)
+       ax3.set_xlabel('$z (km)$')
+       ax3.set_ylabel('$w \: \prime \: (ms^{-1})$')
+       ax3.set_title('Kelvin Wave Vertical Structure: Vertical Velocity')
+       ax3.legend()
+       ax3.grid(b=True, which='both', axis='both')
+       plt.show()
+       
+       plt.savefig("KelvinWaveStructureVariables.png")
        
        #%%
        # Make a test function and its derivative (DEBUG)
@@ -353,6 +455,14 @@ if __name__ == '__main__':
        DY -= np.multiply(term1, term2);
     
        DYD = zH * np.matmul(DDZ, Y)
-       plt.figure
-       plt.plot(zv, Y, zv, DY, zv, DYD, 'k--')
+       plt.figure(figsize=(8, 6), tight_layout=True)
+       plt.plot(zv, Y, label='Function')
+       plt.plot(zv, DY, 'r-', label='Analytical Derivative')
+       plt.plot(zv, DYD, 'k--', label='Spectral Derivative')
+       plt.xlabel('Domain')
+       plt.ylabel('Function')
+       plt.title('Chebyshev Derivative Test')
+       plt.grid(b=True, which='both', axis='both')
+       plt.legend()
+       plt.savefig("DerivativeTest.png")
        '''   
