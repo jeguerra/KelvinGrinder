@@ -302,26 +302,47 @@ if __name__ == '__main__':
        dpdzI = np.reciprocal(dpdz)
        ddpdz2I = np.matmul(DDZ, dpdzI)
        
+       def quadPol(x, a, b, c):
+              return a * np.power(x,2.0) + b * x + c
+       
        def cubicPol(x, a, b, c, d):
               return a * np.power(x,3.0) + b * np.power(x,2.0) + c * x + d
        
        def decayFunc(x, a, b):
               return a * np.reciprocal(np.power(x,b))
        
+       # Compute rho as a function of pressure
        popt, covt = curve_fit(cubicPol, np.ravel(pBar), np.ravel(rhoBar))
        rhoBarP = cubicPol(pBar, *popt)
-       # Spectral derivative... BAD FOR DISCONTINUITY
-       #NBV = np.matmul(DDP, thetaBar)
-       # Use the prescribed lapse rates
+       
+       # Compute the Brunt-Vaisala frequency as a function of z
        NBV = dThdZ
        thetaBarI = np.reciprocal(thetaBar)
        NBV = np.multiply(NBV, thetaBarI)
-       rhoBar2 = np.power(rhoBar, 2.0)
-       rhoBar2I = np.reciprocal(rhoBar2)
-       G2 = 1.0 / gc * np.multiply(rhoBar2I, NBV)
        
-       popt, covt = curve_fit(decayFunc, np.ravel(pBar), np.ravel(G2))
-       G2F = decayFunc(pBar, *popt)
+       # Compute fit of Brunt-Vaisala as a function of pressure (2 branches)
+       zdex1 = np.where(zg >= zTP)
+       zdex2 = np.where(zg < zTP)
+       # Evaluate the branches, force endpoints
+       sigma = np.ones(len(zdex1[0]))
+       sigma[[0, -1]] = 1.0E-3
+       popt1, covt1 = curve_fit(quadPol, np.ravel(pBar[zdex1]), np.ravel(NBV[zdex1]), sigma=sigma)
+       NBV1 = quadPol(pBar[zdex1], *popt1)
+       popt1, covt1 = curve_fit(quadPol, np.ravel(pBar[zdex1]), np.ravel(thetaBar[zdex1]), sigma=sigma)
+       thetaBar1 = quadPol(pBar[zdex1], *popt1)
+       sigma = np.ones(len(zdex2[0]))
+       sigma[[0, -1]] = 1.0E-3
+       popt2, covt2 = curve_fit(cubicPol, np.ravel(pBar[zdex2]), np.ravel(NBV[zdex2]), sigma=sigma)
+       NBV2 = cubicPol(pBar[zdex2], *popt2)
+       popt2, covt2 = curve_fit(cubicPol, np.ravel(pBar[zdex2]), np.ravel(thetaBar[zdex2]), sigma=sigma)
+       thetaBar2 = cubicPol(pBar[zdex2], *popt2)
+       # Compute the full column stratification
+       NBVP = np.concatenate((NBV2.T, NBV1.T))
+       thetaBarP = np.concatenate((thetaBar2.T, thetaBar1.T))
+       
+       rhoBar2P = np.power(rhoBarP, 2.0)
+       rhoBar2IP = np.reciprocal(rhoBar2P)
+       G2 = 1.0 / gc * np.multiply(rhoBar2IP, NBVP)
        
        IG2 = np.reciprocal(G2)
        G2M = np.eye(NZ)
@@ -329,8 +350,8 @@ if __name__ == '__main__':
        FOP1 = np.eye(NZ)
        FOP2 = np.eye(NZ)
        for ii in range(NZ):
-              G2M[ii,ii] = G2F[ii]
-              IG2M[ii,ii] = 1.0 / G2F[ii]
+              G2M[ii,ii] = -G2[ii]
+              IG2M[ii,ii] = 1.0 / G2[ii]
               #FOP1[ii,ii] = dpdzI[ii,0]**2.0
               #FOP2[ii,ii] = ddpdz2I[ii]
               
@@ -353,8 +374,8 @@ if __name__ == '__main__':
        EOPS = EOP[1:NE,1:NE]
        
        # Compute eigensolve
-       #ew, ev = las.eig(LHSOPS, b=RHSOPS)
-       ew, ev = las.eig(EOPS)
+       #ew, ev = las.eig(LHSOPS, b=-RHSOPS, left=False, right=True)
+       ew, ev = las.eig(EOPS, left=False, right=True)
        
        # Recover the Neumann BC values (TOP OF ATMOSPHERE)
        scale = RP - DDP[NE,NE]
@@ -375,7 +396,7 @@ if __name__ == '__main__':
        #vdex = 1
        Psi[1:NE,0] = (ev[:,vdex-1]).flatten()
        Psi[NE,0] = (evTop[vdex-1]).flatten()
-       c1 = mt.sqrt(1.0 / abs(lam[vdex-1]))
+       c1 = mt.sqrt(1.0 / abs(lam[vdex]))
        
        #%% Plot the first eigenvector
        fig, (ax0, ax1) = plt.subplots(nrows=2, figsize=(12, 6), tight_layout=True)
@@ -399,9 +420,10 @@ if __name__ == '__main__':
        
        #%% Recover the physical fields
        cv = c1
-       RT = np.multiply(thetaBar, rhoBar)
+       RT = np.multiply(thetaBarP, rhoBarP)
        IRT = np.reciprocal(RT)
-       wv = np.multiply(-IRT, Psi)
+       rhoBarI = np.reciprocal(rhoBar)
+       wv = np.multiply(-1.0 / gc * rhoBarI, Psi)
        uv = np.matmul(DDP, Psi[:,0])
        uv = cv * uv
        ExnerP = -uv
