@@ -13,7 +13,6 @@ from scipy.optimize import curve_fit
 import math as mt
 from numpy import linalg as lan
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 def cheblb(REFS):
        # Compute Chebyshev CGL nodes and weights
@@ -210,60 +209,23 @@ def computeGridDerivativesZ(REFS):
        
        return zg, SDIFF, DDZ, DDZ2
 
-def computeGridDerivativesP(PHYS, REFS, pBar, dpdz):
+def computeGridDerivativesP(PHYS, REFS, pBar, dpdz, DDZ):
     
        NZ = REFS[2]
-       # Initialize grid and make column vector
-       zc, w = cheblb(REFS)
-       DP = pBar[NZ-1,0] - pBar[0,0]
-       pg = pBar
-       
        dpdzI = np.reciprocal(dpdz)
    
-       # Get the Chebyshev transformation matrix
-       CTD = chebpolym(REFS, zc)
-   
        # Make the weights into a diagonal matrix
-       W = np.eye(NZ)
        IDPDZ = np.eye(NZ)
        for ii in range(NZ):
-              W[ii,ii] = w[ii]
               IDPDZ[ii,ii] = dpdzI[ii]
-   
-       # Compute scaling for the forward transform
-       S = np.eye(NZ)
-   
-       for ii in range(NZ - 1):
-              S[ii,ii] = ((CTD[:,ii]).T * W * CTD[:,ii]) ** (-1)
-
-       S[NZ-1,NZ-1] = 1.0 / mt.pi
-   
-       # Compute the spectral derivative coefficients
-       SDIFF = np.zeros((NZ,NZ))
-       SDIFF[NZ-2,NZ-1] = 2.0 * NZ
-   
-       for ii in reversed(range(NZ - 2)):
-              A = 2.0 * (ii + 1)
-              B = 1.0
-              if ii > 0:
-                     c = 1.0
-              else:
-                     c = 2.0
-            
-              SDIFF[ii,:] = B / c * SDIFF[ii+2,:]
-              SDIFF[ii,ii+1] = A / c
-    
-       # Chebyshev spectral transform in matrix form
-       STR_L = S * CTD * W;
+              
        # Chebyshev spatial derivative based on spectral differentiation
-       # Domain scale factor included here
-       DDP = - (2.0 / DP) * CTD.T * SDIFF * STR_L;
-       # Compute 2nd derivative
-       SDIFF2 = np.matmul(SDIFF, SDIFF)
-       DDP2 = - (2.0 / DP) * CTD.T * SDIFF2 * STR_L;
-       #DDP2 = DDP * DDP
+       # Computed from the Chain Rule on DDZ
+       DDP = IDPDZ * DDZ;
+       # Compute 2nd derivative in pressure
+       DDP2 = DDP * DDP
    
-       return pg, SDIFF, DDP, DDP2
+       return pBar, DDP, DDP2
 
 if __name__ == '__main__':
        
@@ -295,7 +257,7 @@ if __name__ == '__main__':
        thetaBar, dThdZ, rhoBar, pBar = computeBackground(PHYS, REFS, zg, DDZ)
        
        # Compute the isobaric grid and derivative matrices
-       pg, SDIFFP, DDP, DDP2 = computeGridDerivativesP(PHYS, REFS, pBar, -gc * rhoBar)
+       pg, DDP, DDP2 = computeGridDerivativesP(PHYS, REFS, pBar, -gc * rhoBar, DDZ)
        
        # Compute the variable stratification and make a diagonal matrix
        dpdz = -gc * rhoBar
@@ -346,21 +308,9 @@ if __name__ == '__main__':
        
        IG2 = np.reciprocal(G2)
        G2M = np.eye(NZ)
-       IG2M = np.eye(NZ)
-       FOP1 = np.eye(NZ)
-       FOP2 = np.eye(NZ)
        for ii in range(NZ):
-              G2M[ii,ii] = -G2[ii]
-              IG2M[ii,ii] = 1.0 / G2[ii]
-              #FOP1[ii,ii] = dpdzI[ii,0]**2.0
-              #FOP2[ii,ii] = ddpdz2I[ii]
+              G2M[ii,ii] = G2[ii]
               
-       # Compute the differential operator
-       #EOP1 = np.matmul(FOP1, DDZ2)
-       #EOP2 = np.matmul(FOP2, DDZ)
-       #EOP = EOP1 + EOP2
-       
-       #DP = pBar[0]
        RP = 1.0
        LHSOP = computeAdjustedOperatorNBC(DDP2, DDP2, DDP, NZ-1, False, RP)
        RHSOP = computeAdjustedOperatorNBC(G2M, G2M, DDP, NZ-1, False, RP)
@@ -374,8 +324,7 @@ if __name__ == '__main__':
        EOPS = EOP[1:NE,1:NE]
        
        # Compute eigensolve
-       #ew, ev = las.eig(LHSOPS, b=-RHSOPS, left=False, right=True)
-       ew, ev = las.eig(EOPS, left=False, right=True)
+       ew, ev = las.eig(LHSOPS, b=RHSOPS, left=False, right=True)
        
        # Recover the Neumann BC values (TOP OF ATMOSPHERE)
        scale = RP - DDP[NE,NE]
@@ -385,15 +334,13 @@ if __name__ == '__main__':
        #%% Sort the eigenvalues and vectors ascending
        Psi = np.zeros((NZ,1))
        sdex = np.argsort(np.real(ew))
-       #lam = np.multiply(ew[sdex], G2[sdex,0].flatten())
-       #lam = np.ravel(lam.T)
        lam = ew[sdex]
        ev = ev[:,sdex]
        evTop = (evTop.T)[sdex]
        
-       # Find the next to smallest (negative) eigenvalue
+       # Find the next to smallest eigenvalue (n = 1)
        vdex = np.argmin(np.abs(lam))
-       #vdex = 1
+       vdex -= 1
        Psi[1:NE,0] = (ev[:,vdex-1]).flatten()
        Psi[NE,0] = (evTop[vdex-1]).flatten()
        c1 = mt.sqrt(1.0 / abs(lam[vdex]))
@@ -420,20 +367,20 @@ if __name__ == '__main__':
        
        #%% Recover the physical fields
        cv = c1
-       RT = np.multiply(thetaBarP, rhoBarP)
+       RT = np.multiply(thetaBar, rhoBar)
        IRT = np.reciprocal(RT)
        rhoBarI = np.reciprocal(rhoBar)
        wv = np.multiply(-1.0 / gc * rhoBarI, Psi)
-       uv = np.matmul(DDP, Psi[:,0])
-       uv = cv * uv
-       ExnerP = -uv
-       B = -cv * np.matmul(DDP2, Psi[:,0])
-       B[0,0] = 0.0
-       theta = np.multiply(-RT, B.T) 
+       uv = -np.matmul(DDP, Psi)
+       ExnerP = cv * uv
+       BUO = -cv * np.matmul(DDP2, Psi)
+       BUO[0] = lam[vdex] * G2[0] * Psi[0]
+       BUO[-1] = lam[vdex] * G2[-1] * Psi[-1]
+       theta = np.multiply(-RT, BUO) 
        
        fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(nrows=2, ncols=2, figsize=(12, 6), tight_layout=True)
        
-       ax0.plot(1.0E-3 * zg, P0 * (ExnerP.T), 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % cv)
+       ax0.plot(1.0E-3 * zg, P0 * ExnerP, 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % cv)
        ax0.set_xlabel('$z (km)$')
        ax0.set_ylabel('$p \: \prime \: (Pa)$')
        ax0.set_title('Kelvin Wave Vertical Structure: Pressure')
@@ -447,7 +394,7 @@ if __name__ == '__main__':
        ax1.legend()
        ax1.grid(b=True, which='both', axis='both')
        
-       ax2.plot(1.0E-3 * zg, uv.T, 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % cv)
+       ax2.plot(1.0E-3 * zg, uv, 'k', label='$\psi(z)$, c = %5.3f $ms^{-1}$' % cv)
        ax2.set_xlabel('$z (km)$')
        ax2.set_ylabel('$u \: \prime \: (ms^{-1})$')
        ax2.set_title('Kelvin Wave Vertical Structure: Horizontal Velocity')
