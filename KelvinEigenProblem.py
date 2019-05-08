@@ -6,7 +6,6 @@ Created on Wed Dec 12 12:03:48 2018
 @author: jeguerra
 """
 
-import datetime as dt  # Python standard library datetime module
 import numpy as np
 from scipy import linalg as las
 from scipy.optimize import curve_fit
@@ -66,7 +65,6 @@ def computeAdjustedOperatorNBC(D2A, DOG, DD, tdex, isGivenValue, DP):
        # Loop over columns of the operator and adjust for BC at z = H (tdex)
        for jj in cdex:
               factor = DD[tdex,jj] / scale
-              #factor = scale / DD[tdex,jj]
               v1 = (D2A[:,jj]).flatten()
               v2 = (DOG[:,tdex]).flatten()
               nvector = v1 + factor * v2
@@ -242,7 +240,7 @@ if __name__ == '__main__':
        # Set up the grid using Tempest nominal HS data near the equator
        zH = 35000.0
        zTP = 16000.0
-       NZ = 256
+       NZ = 512
        T0 = 295.0
        GamTrop = 1.88E-3 # K per meter
        GamStrt = 2.37E-2 # K per meter
@@ -314,17 +312,14 @@ if __name__ == '__main__':
        RP = 1.0
        LHSOP = computeAdjustedOperatorNBC(DDP2, DDP2, DDP, NZ-1, False, RP)
        RHSOP = computeAdjustedOperatorNBC(G2M, G2M, DDP, NZ-1, False, RP)
-       
-       EOP = LHSOP + RHSOP
               
        # Apply Dirichlet BC @ z = 0 and z = H
        NE = NZ-1
        LHSOPS = LHSOP[1:NE,1:NE]
        RHSOPS = RHSOP[1:NE,1:NE]
-       EOPS = EOP[1:NE,1:NE]
        
        # Compute eigensolve
-       ew, ev = las.eig(LHSOPS, b=RHSOPS, left=False, right=True)
+       ew, ev = las.eig(LHSOPS, b=-RHSOPS, left=False, right=True)
        
        # Recover the Neumann BC values (TOP OF ATMOSPHERE)
        scale = RP - DDP[NE,NE]
@@ -340,7 +335,7 @@ if __name__ == '__main__':
        
        # Find the next to smallest eigenvalue (n = 1)
        vdex = np.argmin(np.abs(lam))
-       vdex -= 1
+       vdex += 1
        Psi[1:NE,0] = (ev[:,vdex-1]).flatten()
        Psi[NE,0] = (evTop[vdex-1]).flatten()
        c1 = mt.sqrt(1.0 / abs(lam[vdex]))
@@ -373,7 +368,7 @@ if __name__ == '__main__':
        wv = np.multiply(-1.0 / gc * rhoBarI, Psi)
        uv = -np.matmul(DDP, Psi)
        ExnerP = cv * uv
-       BUO = -cv * np.matmul(DDP2, Psi)
+       BUO = np.matmul(DDP, ExnerP)
        BUO[0] = lam[vdex] * G2[0] * Psi[0]
        BUO[-1] = lam[vdex] * G2[-1] * Psi[-1]
        theta = np.multiply(-RT, BUO) 
